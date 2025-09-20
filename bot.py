@@ -102,8 +102,7 @@ async def voice_translator(message: Message):
     with sr.AudioFile(wav_path) as src:
         audio_data = r.record(src)
         try:
-
-Txt = r.recognize_google(audio_data)
+            Txt = r.recognize_google(audio_data)
             tarjome = GoogleTranslator(source="auto", target=target_lang).translate(Txt)
             await message.reply(f"ترجمه:\n{tarjome}", reply_markup=change_language())
         except Exception as e:
