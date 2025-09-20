@@ -71,7 +71,7 @@ async def handler_language_selection(message:Message):
     selected_lang = language_options[message.text]
     user_langs[user_id] = selected_lang
     save_user_langs(user_langs)
-    await message.answer("متن را وارد کنید: \n  برای تغییر زبان مقصد دکمه زیر را فشار دهید." , reply_markup=change_language())
+    await message.answer("متن را وارد کنید: \start  برای تغییر زبان مقصد دکمه زیر را فشار دهید." , reply_markup=change_language())
     reply_markup = types.ReplyKeyboardRemove()
 
 @dp.callback_query(F.data=="change_target")
