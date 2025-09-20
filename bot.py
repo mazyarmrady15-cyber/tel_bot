@@ -60,7 +60,6 @@ def save_user_langs(data):
 
 
 @dp.message(CommandStart())
-async def start_reply(message:Message):
     user_id = str(message.from_user.id)
     user_langs.pop(user_id,None)
     save_user_langs(user_langs)
