@@ -1,5 +1,5 @@
 python-telegram-bot==20.0
-aiogram==3.10.0
+aiogram==2.25.1
 deep-translator==1.11.4
 SpeechRecognition==3.10.1
 pydub==0.25.1
