@@ -1,6 +1,6 @@
-from aiogram import Bot,Dispatcher,types,F
+from aiogram import Bot,Dispatcher,types,executor
 from aiogram.types import Message,ReplyKeyboardMarkup,KeyboardButton,InlineKeyboardButton,InlineKeyboardMarkup
-from aiogram.filters import CommandStart
+from aiogram.dispatcher.filters import CommandStart
 import asyncio
 from deep_translator import GoogleTranslator
 import json
@@ -13,7 +13,7 @@ from http.server import SimpleHTTPRequestHandler, HTTPServer
 
 def run_server():
     port = int(os.environ.get("PORT",10000))
-    server = HTTPSwrvwr(("0.0.0.0", port), SimpleHTTPRequestHandler)
+    server = HTTPServer(("0.0.0.0", port), SimpleHTTPRequestHandler)
     server.server_forever()
 
 threading.Thread(target=run_server, daemon=True).start()
@@ -93,7 +93,7 @@ async def reply_message(message:Message):
         await message.answer("ابتدا زبان مقصد را وارد کنید,برای انتخاب دستور /start را وارد کنید.")
         return
     try:
-        tarjome = GoogleTranslator(source=lang_data['auto'],target=lang_data).translate(message.text)
+        tarjome = GoogleTranslator(source='auto',target=lang_data).translate(message.text)
         await message.reply(f"ترجمه: \n{tarjome}")
     except Exception as e:
         return f"اوه خطا زد از اول شروع کن /start"
@@ -113,7 +113,7 @@ async def voice_translator(message:Message):
 
     ogg_path = f"voice_{user_id}.ogg"
     with open(ogg_path, "wb") as f:
-        f.write(downloaded_file.getvajue())
+        f.write(downloaded_file.getvalue())
 
     wav_path = f"voice_{user_id}.wav"
     user_voice = AudioSegment.from_ogg(ogg_path)
