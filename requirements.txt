@@ -4,5 +4,5 @@ deep-translator==1.11.4
 SpeechRecognition==3.10.1
 pydub==0.25.1
 pydantic==1.10.13
-aiohttp==3.9.5
+aiohttp==3.8.6
 requests
