@@ -8,7 +8,17 @@ from pathlib import Path
 import speech_recognition as sr
 from pydub import AudioSegment
 import os
+import threading
+from http.server import SimpleHTTPRequestHandler, HTTPServer
 
+def run_server():
+    port = int(os.environ.get("PORT",10000))
+    server = HTTPSwrvwr(("0.0.0.0", port), SimpleHTTPRequestHandler)
+    server.server_forever()
+
+threading.Thread(target=run_server, daemon=True).start()
+
+from aiogram import Bot, Dispatcher, executor, types
 
 
 TOKEN = '8270631879:AAEXhJ9G_5PPLUUSiqYBgnRpZZ3RNlAp0kY'
