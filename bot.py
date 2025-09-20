@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import CommandStart
+from aiogram.dispatcher.filters import CommandStart
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from deep_translator import GoogleTranslator
 from pydub import AudioSegment
