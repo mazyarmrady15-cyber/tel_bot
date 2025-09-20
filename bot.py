@@ -14,7 +14,7 @@ from http.server import SimpleHTTPRequestHandler, HTTPServer
 def run_server():
     port = int(os.environ.get("PORT",10000))
     server = HTTPServer(("0.0.0.0", port), SimpleHTTPRequestHandler)
-    server.server_forever()
+    server.serve_forever()
 
 threading.Thread(target=run_server, daemon=True).start()
 
@@ -25,7 +25,7 @@ TOKEN = '8270631879:AAEXhJ9G_5PPLUUSiqYBgnRpZZ3RNlAp0kY'
 
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 
 language_options={
     'فارسی':'fa',
