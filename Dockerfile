@@ -1,6 +1,6 @@
 From python:3.11
 
-Run apt-get update && apt-get install -y \ ffmpeg \ portaudio19-dev \ && rm -rf /var/lib/apt/lists/*
+Run apt-get update && apt-get install -y \ apt-utils \ software-properties-common \ ffmpeg \ portaudio19-dev \ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
