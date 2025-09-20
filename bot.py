@@ -11,7 +11,7 @@ import speech_recognition as sr
 
 TOKEN = "8270631879:AAEXhJ9G_5PPLUUSiqYBgnRpZZ3RNlAp0kY"
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot, storage=MemoryStorage())
 
 language_options = {
     "فارسی": "fa",
