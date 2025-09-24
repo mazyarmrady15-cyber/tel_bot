@@ -3,6 +3,7 @@ import json
 import tempfile
 from pathlib import Path
 from fastapi import FastAPI, Request
+import asyncio
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
@@ -21,11 +22,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN env var is required")
 
-BASE_URL = os.getenv("BASE_URL")
+WEBHOOK_PATH = "/webhook"
+BASE_URL = os.getenv("BASE_URL")  # آدرس public که Render میده
 if not BASE_URL:
     raise RuntimeError("BASE_URL env var is required")
 
-WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = BASE_URL + WEBHOOK_PATH
 PORT = int(os.getenv("PORT", 10000))
 
@@ -75,24 +76,6 @@ def change_language_kb():
     ])
 
 
-# ---------------- Helpers ----------------
-def cleanup_temp_files(*files):
-    for f in files:
-        try:
-            if f and Path(f).exists():
-                Path(f).unlink()
-        except Exception:
-            pass
-
-
-async def translate_and_speak(text: str, lang: str, uid: str):
-    translated = GoogleTranslator(source="auto", target=lang).translate(text)
-    tts = gTTS(translated, lang=lang)
-    temp_file = Path(tempfile.gettempdir()) / f"voice_{uid}.mp3"
-    tts.save(temp_file)
-    return translated, temp_file
-
-
 # ---------------- Handlers ----------------
 @dp.message(CommandStart())
 async def start_handler(message: Message):
@@ -116,106 +99,142 @@ async def change_target_callback(cq: types.CallbackQuery):
     uid = str(cq.from_user.id)
     user_langs.pop(uid, None)
     save_user_langs(user_langs)
-    await cq.message.edit_text("زبان مقصد جدید را انتخاب کنید:", reply_markup=get_language_keyboard())
+    await cq.message.edit_text("زبان مقصد جدید را انتخاب کنید", reply_markup=None)
+    await cq.message.answer("زبان مقصد را انتخاب کنید:", reply_markup=get_language_keyboard())
+    await cq.answer()
 
 
-# ---------------- Text ----------------
 @dp.message(F.text)
-async def handle_text(message: Message):
+async def text_translate(message: Message):
     uid = str(message.from_user.id)
-    if uid not in user_langs:
-        await message.answer("لطفاً اول زبان مقصد را انتخاب کنید:", reply_markup=get_language_keyboard())
+    target = user_langs.get(uid)
+    if not target:
+        await message.answer("ابتدا زبان مقصد را انتخاب کنید (/start).")
         return
+    try:
+        translated = GoogleTranslator(source="auto", target=target).translate(message.text)
+        await message.reply(f"ترجمه:\n{translated}", reply_markup=change_language_kb())
+    except Exception as e:
+        await message.reply(f"خطا در ترجمه: {e}")
 
-    lang = user_langs[uid]
-    translated, voice_file = await translate_and_speak(message.text, lang, uid)
-    await message.answer(translated, reply_markup=change_language_kb())
-    await message.answer_voice(InputFile(voice_file))
-    cleanup_temp_files(voice_file)
 
-# ---------------- Voice ----------------
+# ---------------- Voice Handler ----------------
 @dp.message(F.voice)
 async def handle_voice(message: Message):
     uid = str(message.from_user.id)
-    if uid not in user_langs:
-        await message.answer("لطفاً اول زبان مقصد را انتخاب کنید:", reply_markup=get_language_keyboard())
+    target = user_langs.get(uid)
+    if not target:
+        await message.answer("ابتدا زبان مقصد را انتخاب کنید (/start).")
         return
 
-    lang = user_langs[uid]
-    file = await bot.get_file(message.voice.file_id)
-    temp_ogg = Path(tempfile.gettempdir()) / f"{uid}.ogg"
-    temp_wav = Path(tempfile.gettempdir()) / f"{uid}.wav"
-    await bot.download_file(file.file_path, temp_ogg)
+    await message.answer("🎙 در حال پردازش ویس...")
 
-    try:
-        os.system(f"ffmpeg -i {temp_ogg} {temp_wav} -y -loglevel quiet")
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(str(temp_wav)) as src:
-            audio_data = recognizer.record(src)
-            text = recognizer.recognize_google(audio_data, language="fa-IR")
-    except Exception:
-        await message.answer("❌ خطا در پردازش ویس")
-        cleanup_temp_files(temp_ogg, temp_wav)
-        return
+with tempfile.TemporaryDirectory() as tmpdir:
+        ogg_path = Path(tmpdir) / f"voice_{uid}.ogg"
+        wav_path = Path(tmpdir) / f"voice_{uid}.wav"
 
-    translated, voice_file = await translate_and_speak(text, lang, uid)
-    await message.answer(translated, reply_markup=change_language_kb())
-    await message.answer_voice(InputFile(voice_file))
-    cleanup_temp_files(temp_ogg, temp_wav, voice_file)
+        try:
+            file_info = await bot.get_file(message.voice.file_id)
+            downloaded = await bot.download_file(file_info.file_path)
+            with open(ogg_path, "wb") as f:
+                f.write(downloaded.read())
+        except Exception as e:
+            await message.reply(f"❌ خطا در دانلود ویس: {e}")
+            return
+
+        try:
+            import subprocess
+            subprocess.run(["ffmpeg", "-y", "-i", str(ogg_path), str(wav_path)], check=True)
+        except Exception as e:
+            await message.reply(f"❌ خطا در تبدیل ویس: {e}")
+            return
+
+        r = sr.Recognizer()
+        try:
+            with sr.AudioFile(str(wav_path)) as source:
+                audio_data = r.record(source)
+            recognized_text = r.recognize_google(audio_data)
+        except sr.UnknownValueError:
+            recognized_text = ""
+        except Exception as e:
+            await message.reply(f"❌ خطا در تشخیص گفتار: {e}")
+            return
+
+        if not recognized_text:
+            await message.reply("❌ متنی از ویس تشخیص داده نشد.")
+            return
+
+        try:
+            translated_text = GoogleTranslator(source="auto", target=target).translate(recognized_text)
+        except Exception as e:
+            await message.reply(f"❌ خطا در ترجمه: {e}")
+            return
+
+        try:
+            tts = gTTS(text=translated_text, lang=target)
+            mp3_path = Path(tmpdir) / f"voice_translated_{uid}.mp3"
+            tts.save(str(mp3_path))
+        except Exception as e:
+            await message.reply(f"❌ خطا در ساخت ویس: {e}")
+            return
+
+        try:
+            await message.reply_document(InputFile(str(mp3_path)), caption="🎧 ترجمه ویس به صورت صدا")
+        except Exception as e:
+            await message.reply(f"❌ خطا در ارسال فایل: {e}")
 
 
-# ---------------- Video ----------------
-@dp.message(F.video)
+# ---------------- Video Handler ----------------
+def _save_bytesio_to_file(bytes_or_buffer, path: str):
+    if hasattr(bytes_or_buffer, "read"):
+        data = bytes_or_buffer.read()
+    else:
+        data = bytes_or_buffer
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+@dp.message(F.video | F.document)
 async def handle_video(message: Message):
     uid = str(message.from_user.id)
-    if uid not in user_langs:
-        await message.answer("لطفاً اول زبان مقصد را انتخاب کنید:", reply_markup=get_language_keyboard())
+    target = user_langs.get(uid)
+    if not target:
+        await message.answer("ابتدا زبان مقصد را انتخاب کنید (/start).")
         return
 
-    lang = user_langs[uid]
-    file = await bot.get_file(message.video.file_id)
-    temp_mp4 = Path(tempfile.gettempdir()) / f"{uid}.mp4"
-    temp_wav = Path(tempfile.gettempdir()) / f"{uid}.wav"
+    await message.answer("📥 ویدیو دریافت شد، در حال پردازش...")
 
-    await bot.download_file(file.file_path, temp_mp4)
-    await message.answer("📩 ویدیو دریافت شد، در حال پردازش...")
-
-    try:
-        clip = VideoFileClip(str(temp_mp4))
-        clip.audio.write_audiofile(temp_wav, codec="pcm_s16le", logger=None)
-        clip.close()
-
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(str(temp_wav)) as src:
-            audio_data = recognizer.record(src)
-            text = recognizer.recognize_google(audio_data, language="fa-IR")
-    except Exception:
-        await message.answer("❌ خطا در پردازش ویدیو")
-        cleanup_temp_files(temp_mp4, temp_wav)
+    file_id = None
+    file_name = None
+    if message.video:
+        file_id = message.video.file_id
+        file_name = getattr(message.video, "file_name", f"video_{uid}.mp4")
+    elif message.document and message.document.mime_type and message.document.mime_type.startswith("video"):
+        file_id = message.document.file_id
+        file_name = message.document.file_name or f"video_{uid}.mp4"
+    else:
+        await message.reply("لطفاً فقط فایل ویدیو ارسال کنید.")
         return
 
-    translated, voice_file = await translate_and_speak(text, lang, uid)
-    await message.answer(translated, reply_markup=change_language_kb())
-    await message.answer_voice(InputFile(voice_file))
-    cleanup_temp_files(temp_mp4, temp_wav, voice_file)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        video_path = Path(tmpdir) / file_name
+        try:
+            file_info = await bot.get_file(file_id)
+            downloaded = await bot.download_file(file_info.file_path)
+            _save_bytesio_to_file(downloaded, str(video_path))
+        except Exception as e:
+            await message.reply(f"❌ خطا در دانلود فایل: {e}")
+            return
 
-
-# ---------------- FastAPI ----------------
-app = FastAPI()
-
-
-@app.on_event("startup")
-async def on_startup():
-    await bot.set_webhook(WEBHOOK_URL)
-
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    await bot.delete_webhook()
-
-
-@app.post(WEBHOOK_PATH)
-async def bot_webhook(request: Request):
-    update = types.Update.model_validate(await request.json(), context={"bot": bot})
-    await dp.feed_update(bot, update)
-    return {"ok": True}
+        wav_path = Path(tmpdir) / f"audio_{uid}.wav"
+        try:
+            clip = VideoFileClip(str(video_path))
+            if clip.audio is None:
+                await message.reply("این ویدیو صدا ندارد.")
+                return
+            clip.audio.write_audiofile(str(wav_path), fps=16000, codec="pcm_s16le", verbose=False, logger=None)
+            clip.reader.close()
+            clip.audio.reader.close_proc()
+        except Exception as e:
+            await message.reply(f"❌ خطا در استخراج صدا: {e}")
+            return
