@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: telegram-translator-bot
+    env: docker
+    plan: free
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: BASE_URL
+        sync: false
