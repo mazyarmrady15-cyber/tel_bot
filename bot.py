@@ -1,110 +1,228 @@
 import os
 import json
+import tempfile
+from pathlib import Path
+from fastapi import FastAPI, Request
 import asyncio
-import speech_recognition as sr
-from aiogram import Bot, Dispatcher, types
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.utils import executor
+
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import CommandStart
+from aiogram.types import (
+    Message, ReplyKeyboardMarkup, KeyboardButton,
+    InlineKeyboardMarkup, InlineKeyboardButton, InputFile
+)
+
 from deep_translator import GoogleTranslator
-from pydub import AudioSegment
+from gtts import gTTS
+import speech_recognition as sr
+from moviepy.editor import VideoFileClip
 
-API_TOKEN = "8270631879:AAEXhJ9G_5PPLUUSiqYBgnRpZZ3RNlAp0kY"
+# ---------------- Config ----------------
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN env var is required")
 
-# ساخت ربات
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot, storage=MemoryStorage())
+WEBHOOK_PATH = "/webhook"
+BASE_URL = os.getenv("BASE_URL")  # آدرس public که Render میده (https://xxxx.onrender.com)
+if not BASE_URL:
+    raise RuntimeError("BASE_URL env var is required")
 
-# ذخیره زبان کاربران
-USER_LANGS_FILE = "user_langs.json"
-LANG_OPTIONS = {
-    "🇬🇧 English": "en",
-    "🇮🇷 فارسی": "fa",
-    "🇹🇷 Türkçe": "tr",
-    "🇷🇺 Русский": "ru",
-    "🇸🇦 العربية": "ar",
-    "🇪🇸 Español": "es",
-    "🇫🇷 Français": "fr",
+WEBHOOK_URL = BASE_URL + WEBHOOK_PATH
+PORT = int(os.getenv("PORT", 10000))
+
+bot = Bot(BOT_TOKEN)
+dp = Dispatcher()
+
+USER_LANG_FILE = Path("user_langs.json")
+
+language_options = {
+    "فارسی": "fa",
+    "انگلیسی": "en",
+    "فرانسوی": "fr",
+    "آلمانی": "de",
+    "اسپانیایی": "es",
 }
 
-# ---------- مدیریت فایل زبان ----------
+
+# ---------------- User Langs Storage ----------------
 def load_user_langs():
-    if os.path.exists(USER_LANGS_FILE):
-        with open(USER_LANGS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+    if USER_LANG_FILE.exists():
+        try:
+            return json.loads(USER_LANG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
     return {}
 
+
 def save_user_langs(data):
-    with open(USER_LANGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    USER_LANG_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
 
 user_langs = load_user_langs()
 
 
-# ---------- استارت ----------
-@dp.message_handler(commands=["start"])
-async def command_start(message: types.Message):
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    for lang in LANG_OPTIONS.keys():
-        keyboard.add(lang)
-    await message.answer("سلام! 🌍 لطفا زبان مورد نظر خود را انتخاب کنید:", reply_markup=keyboard)
+# ---------------- Keyboards ----------------
+def get_language_keyboard():
+    names = list(language_options.keys())
+    rows = []
+    for i in range(0, len(names), 2):
+        rows.append([KeyboardButton(text=names[i])] + ([KeyboardButton(text=names[i+1])] if i+1 < len(names) else []))
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
-# ---------- انتخاب زبان ----------
-@dp.message_handler(lambda msg: msg.text in LANG_OPTIONS.keys())
-async def set_language(message: types.Message):
-    user_id = str(message.from_user.id)
-    user_langs[user_id] = LANG_OPTIONS[message.text]
+def change_language_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="تغییر زبان مقصد", callback_data="change_target")]
+    ])
+
+
+# ---------------- Handlers ----------------
+@dp.message(CommandStart())
+async def start_handler(message: Message):
+    uid = str(message.from_user.id)
+    user_langs.pop(uid, None)
     save_user_langs(user_langs)
-    await message.answer(f"زبان شما تنظیم شد: {message.text}", reply_markup=types.ReplyKeyboardRemove())
+    await message.answer("سلام 👋 زبان مقصد را انتخاب کنید:", reply_markup=get_language_keyboard())
 
 
-# ---------- ترجمه متن ----------
-@dp.message_handler(content_types=["text"])
-async def translate_text(message: types.Message):
-    user_id = str(message.from_user.id)
-    target_lang = user_langs.get(user_id, "en")
+@dp.message(F.text.in_(language_options.keys()))
+async def select_language(message: Message):
+    uid = str(message.from_user.id)
+    sel = language_options[message.text]
+    user_langs[uid] = sel
+    save_user_langs(user_langs)
+    await message.answer("✅ زبان انتخاب شد. حالا متن یا ویدیو بفرست.\nبرای تغییر زبان دکمه زیر:", reply_markup=change_language_kb())
 
+
+@dp.callback_query(F.data == "change_target")
+async def change_target_callback(cq: types.CallbackQuery):
+    uid = str(cq.from_user.id)
+    user_langs.pop(uid, None)
+    save_user_langs(user_langs)
+    await cq.message.edit_text("زبان مقصد جدید را انتخاب کنید", reply_markup=None)
+    await cq.message.answer("زبان مقصد را انتخاب کنید:", reply_markup=get_language_keyboard())
+    await cq.answer()
+
+
+@dp.message(F.text)
+async def text_translate(message: Message):
+    uid = str(message.from_user.id)
+    target = user_langs.get(uid)
+    if not target:
+        await message.answer("ابتدا زبان مقصد را انتخاب کنید (/start).")
+        return
     try:
-        translated = GoogleTranslator(source="auto", target=target_lang).translate(message.text)
-        await message.reply(translated)
+        translated = GoogleTranslator(source="auto", target=target).translate(message.text)
+        await message.reply(f"ترجمه:\n{translated}", reply_markup=change_language_kb())
     except Exception as e:
         await message.reply(f"خطا در ترجمه: {e}")
 
 
-# ---------- ترجمه ویس ----------
-@dp.message_handler(content_types=["voice"])
-async def voice_translator(message: types.Message):
-    user_id = str(message.from_user.id)
-    target_lang = user_langs.get(user_id, "en")
+def _save_bytesio_to_file(bytes_or_buffer, path: str):
+    if hasattr(bytes_or_buffer, "read"):
+        data = bytes_or_buffer.read()
+    else:
+        data = bytes_or_buffer
+    with open(path, "wb") as f:
+        f.write(data)
+@dp.message(F.video | F.document)
+async def handle_video(message: Message):
+    uid = str(message.from_user.id)
+    target = user_langs.get(uid)
+    if not target:
+        await message.answer("ابتدا زبان مقصد را انتخاب کنید (/start).")
+        return
 
-    file = await bot.get_file(message.voice.file_id)
-    ogg_path = f"voice_{user_id}.ogg"
-    wav_path = f"voice_{user_id}.wav"
+    await message.answer("📥 ویدیو دریافت شد، در حال پردازش...")
 
-    await bot.download_file(file.file_path, destination=ogg_path)
+    file_id = None
+    file_name = None
+    if message.video:
+        file_id = message.video.file_id
+        file_name = getattr(message.video, "file_name", f"video_{uid}.mp4")
+    elif message.document and message.document.mime_type and message.document.mime_type.startswith("video"):
+        file_id = message.document.file_id
+        file_name = message.document.file_name or f"video_{uid}.mp4"
+    else:
+        await message.reply("لطفاً فقط فایل ویدیو ارسال کنید.")
+        return
 
-    # تبدیل ogg به wav
-    AudioSegment.from_file(ogg_path, format="ogg").export(wav_path, format="wav")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        video_path = Path(tmpdir) / file_name
+        try:
+            file_info = await bot.get_file(file_id)
+            downloaded = await bot.download_file(file_info.file_path)
+            _save_bytesio_to_file(downloaded, str(video_path))
+        except Exception as e:
+            await message.reply(f"❌ خطا در دانلود فایل: {e}")
+            return
 
-    recognizer = sr.Recognizer()
-    try:
-        with sr.AudioFile(wav_path) as src:
-            audio = recognizer.record(src)
-            text = recognizer.recognize_google(audio, language="auto")
+        wav_path = Path(tmpdir) / f"audio_{uid}.wav"
+        try:
+            clip = VideoFileClip(str(video_path))
+            if clip.audio is None:
+                await message.reply("این ویدیو صدا ندارد.")
+                return
+            clip.audio.write_audiofile(str(wav_path), fps=16000, codec="pcm_s16le", verbose=False, logger=None)
+            clip.reader.close()
+            clip.audio.reader.close_proc()
+        except Exception as e:
+            await message.reply(f"❌ خطا در استخراج صدا: {e}")
+            return
 
-            translated = GoogleTranslator(source="auto", target=target_lang).translate(text)
-            await message.reply(translated)
+        r = sr.Recognizer()
+        try:
+            with sr.AudioFile(str(wav_path)) as source:
+                audio_data = r.record(source)
+            recognized_text = r.recognize_google(audio_data)  # زبان پیش‌فرض انگلیسی
+        except sr.UnknownValueError:
+            recognized_text = ""
+        except Exception as e:
+            await message.reply(f"❌ خطا در تشخیص گفتار: {e}")
+            return
 
-    except Exception as e:
-        await message.reply(f"خطا در پردازش ویس: {e}")
+        if not recognized_text:
+            await message.reply("❌ متنی از صدا تشخیص داده نشد.")
+            return
 
-    finally:
-        if os.path.exists(ogg_path):
-            os.remove(ogg_path)
-        if os.path.exists(wav_path):
-            os.remove(wav_path)
+        try:
+            translated_text = GoogleTranslator(source="auto", target=target).translate(recognized_text)
+        except Exception as e:
+            await message.reply(f"❌ خطا در ترجمه: {e}")
+            return
+
+        try:
+            tts = gTTS(text=translated_text, lang=target)
+            mp3_path = Path(tmpdir) / f"dubbed_{uid}.mp3"
+            tts.save(str(mp3_path))
+        except Exception as e:
+            await message.reply(f"❌ خطا در ساخت صدا: {e}")
+            return
+
+        try:
+            await message.reply_document(InputFile(str(mp3_path)), caption="🎧 فایل صوتی دوبله‌شده")
+        except Exception as e:
+            await message.reply(f"❌ خطا در ارسال فایل: {e}")
 
 
-# ---------- ران کردن ربات ----------
-if name == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+# ---------------- FastAPI App ----------------
+app = FastAPI()
+
+
+@app.on_event("startup")
+async def on_startup():
+    await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
+    print(f"✅ Webhook set to {WEBHOOK_URL}")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await bot.delete_webhook()
+    await bot.session.close()
+
+
+@app.post(WEBHOOK_PATH)
+async def webhook(request: Request):
+    update = await request.json()
+    await dp.feed_update(bot, types.Update(**update))
+    return {"ok": True}
