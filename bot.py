@@ -238,7 +238,7 @@ async def handle_video(message: Message):
         except Exception as e:
             await message.reply(f"❌ خطا در استخراج صدا: {e}")
             return
-    r = sr.Recognizer()
+        r = sr.Recognizer()
         try:
             with sr.AudioFile(str(wav_path)) as source:
                 audio_data = r.record(source)
