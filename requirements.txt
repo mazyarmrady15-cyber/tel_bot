@@ -1,7 +1,9 @@
-python-telegram-bot==20.0
-aiogram==2.25.1
-deep-translator==1.11.4
-SpeechRecognition==3.10.1
+aiogram==3.0.0b7
+fastapi==0.110.0
+uvicorn==0.27.1
+deep-translator==1.8.1
+gTTS==2.3.1
+SpeechRecognition==3.8.1
+moviepy==1.0.3
 pydub==0.25.1
-aiohttp==3.8.6
-requests==2.31.0
+ffmpeg-python==0.2.0
