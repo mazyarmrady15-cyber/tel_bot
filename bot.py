@@ -129,7 +129,7 @@ async def handle_voice(message: Message):
 
     await message.answer("🎙 در حال پردازش ویس...")
 
-with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory() as tmpdir:
         ogg_path = Path(tmpdir) / f"voice_{uid}.ogg"
         wav_path = Path(tmpdir) / f"voice_{uid}.wav"
 
