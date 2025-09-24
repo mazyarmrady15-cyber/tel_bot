@@ -182,10 +182,8 @@ with tempfile.TemporaryDirectory() as tmpdir:
             await message.reply_document(InputFile(str(mp3_path)), caption="🎧 ترجمه ویس به صورت صدا")
         except Exception as e:
             await message.reply(f"❌ خطا در ارسال فایل: {e}")
-
-
 # ---------------- Video Handler ----------------
-def _save_bytesio_to_file(bytes_or_buffer, path: str):
+async def _save_bytesio_to_file(bytes_or_buffer, path: str):
     if hasattr(bytes_or_buffer, "read"):
         data = bytes_or_buffer.read()
     else:
