@@ -18,7 +18,7 @@ import speech_recognition as sr
 from moviepy.editor import VideoFileClip
 
 # ---------------- Config ----------------
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("8270631879:AAEXhJ9G_5PPLUUSiqYBgnRpZZ3RNlAp0kY")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN env var is required")
 
