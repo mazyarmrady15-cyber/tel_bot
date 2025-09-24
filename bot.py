@@ -238,3 +238,69 @@ async def handle_video(message: Message):
         except Exception as e:
             await message.reply(f"❌ خطا در استخراج صدا: {e}")
             return
+ r = sr.Recognizer()
+        try:
+            with sr.AudioFile(str(wav_path)) as source:
+                audio_data = r.record(source)
+            recognized_text = r.recognize_google(audio_data)
+        except sr.UnknownValueError:
+            recognized_text = ""
+        except Exception as e:
+            await message.reply(f"❌ خطا در تشخیص گفتار: {e}")
+            return
+
+        if not recognized_text:
+            await message.reply("❌ متنی از صدا تشخیص داده نشد.")
+            return
+
+        try:
+            translated_text = GoogleTranslator(source="auto", target=target).translate(recognized_text)
+        except Exception as e:
+            await message.reply(f"❌ خطا در ترجمه: {e}")
+            return
+
+        try:
+            tts = gTTS(text=translated_text, lang=target)
+            mp3_path = Path(tmpdir) / f"dubbed_{uid}.mp3"
+            tts.save(str(mp3_path))
+        except Exception as e:
+            await message.reply(f"❌ خطا در ساخت صدا: {e}")
+            return
+
+        try:
+            await message.reply_document(InputFile(str(mp3_path)), caption="🎧 فایل صوتی دوبله‌شده")
+        except Exception as e:
+            await message.reply(f"❌ خطا در ارسال فایل: {e}")
+
+
+# ---------------- FastAPI App ----------------
+app = FastAPI()
+
+
+@app.on_event("startup")
+async def on_startup():
+    await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
+    print(f"✅ Webhook set to {WEBHOOK_URL}")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await bot.delete_webhook()
+    await bot.session.close()
+
+
+@app.post(WEBHOOK_PATH)
+async def webhook(request: Request):
+    update = await request.json()
+    await dp.feed_update(bot, types.Update(**update))
+    return {"ok": True}
+
+
+# ✅ اضافه شده برای جلوگیری از خطای 404
+@app.get("/")
+async def root():
+    return {"status": "ok"}
+
+@app.get(WEBHOOK_PATH)
+async def webhook_get():
+    return {"status": "webhook alive"}
